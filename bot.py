@@ -1,7 +1,6 @@
 import discord
 from discord import app_commands
 import aiohttp
-import asyncio
 import os
 
 # ─────────────────────────────────────────────
@@ -17,24 +16,7 @@ intents.members = True
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
-TIMEOUT = aiohttp.ClientTimeout(total=10)  # 10 second timeout on all requests
-
-
-async def get_roblox_user_id(username: str) -> int | None:
-    """Returns Roblox user ID from a username, or None if not found."""
-    url = "https://users.roblox.com/v1/usernames/users"
-    payload = {"usernames": [username], "excludeBannedUsers": False}
-
-    try:
-        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
-            async with session.post(url, json=payload) as resp:
-                if resp.status != 200:
-                    return None
-                data = await resp.json()
-                users = data.get("data", [])
-                return users[0]["id"] if users else None
-    except Exception:
-        return None
+TIMEOUT = aiohttp.ClientTimeout(total=10)
 
 
 async def owns_gamepass(roblox_user_id: int, gamepass_id: int) -> bool:
@@ -61,27 +43,29 @@ async def on_ready():
 
 
 @tree.command(name="verify", description="Verify your Roblox gamepass to get the Supporter role")
-@app_commands.describe(roblox_username="Your exact Roblox username")
-async def verify(interaction: discord.Interaction, roblox_username: str):
+@app_commands.describe(roblox_id="Your Roblox User ID (found in your profile URL)")
+async def verify(interaction: discord.Interaction, roblox_id: str):
     await interaction.response.defer(ephemeral=True)
 
-    # 1. Look up the Roblox user ID
-    roblox_id = await get_roblox_user_id(roblox_username)
-    if roblox_id is None:
+    # 1. Make sure the ID is a valid number
+    if not roblox_id.strip().isdigit():
         await interaction.followup.send(
-            f"❌ Could not find a Roblox account with the username **{roblox_username}**. "
-            "Please double-check your spelling.",
+            "❌ That doesn't look like a valid Roblox User ID. "
+            "It should be a number — find it in your Roblox profile URL: "
+            "`roblox.com/users/`**YOUR_ID**`/profile`",
             ephemeral=True,
         )
         return
 
+    user_id = int(roblox_id.strip())
+
     # 2. Check gamepass ownership
-    has_pass = await owns_gamepass(roblox_id, GAMEPASS_ID)
+    has_pass = await owns_gamepass(user_id, GAMEPASS_ID)
     if not has_pass:
         await interaction.followup.send(
-            f"❌ **{roblox_username}** does not own the required gamepass, "
-            "or their Roblox inventory is set to private. "
-            "Make sure your inventory is public and try again.",
+            f"❌ Roblox account `{user_id}` does not own the required gamepass, "
+            "or your Roblox inventory is set to private. "
+            "Go to Roblox **Settings → Privacy** and set inventory to **Everyone**, then try again.",
             ephemeral=True,
         )
         return
@@ -106,10 +90,10 @@ async def verify(interaction: discord.Interaction, roblox_username: str):
         )
         return
 
-    await member.add_roles(role, reason=f"Verified Roblox gamepass ownership ({roblox_username})")
+    await member.add_roles(role, reason=f"Verified Roblox gamepass ownership (ID: {user_id})")
     await interaction.followup.send(
         f"🎉 Verified! You've been given the **{SUPPORTER_ROLE_NAME}** role. "
-        f"Thanks for your support, **{roblox_username}**!",
+        f"Thanks for your support!",
         ephemeral=True,
     )
 
