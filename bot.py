@@ -1,6 +1,7 @@
 import discord
 from discord import app_commands
 import aiohttp
+import asyncio
 import os
 
 # ─────────────────────────────────────────────
@@ -16,19 +17,24 @@ intents.members = True
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
+TIMEOUT = aiohttp.ClientTimeout(total=10)  # 10 second timeout on all requests
+
 
 async def get_roblox_user_id(username: str) -> int | None:
     """Returns Roblox user ID from a username, or None if not found."""
     url = "https://users.roblox.com/v1/usernames/users"
     payload = {"usernames": [username], "excludeBannedUsers": False}
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload) as resp:
-            if resp.status != 200:
-                return None
-            data = await resp.json()
-            users = data.get("data", [])
-            return users[0]["id"] if users else None
+    try:
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+            async with session.post(url, json=payload) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                users = data.get("data", [])
+                return users[0]["id"] if users else None
+    except Exception:
+        return None
 
 
 async def owns_gamepass(roblox_user_id: int, gamepass_id: int) -> bool:
@@ -37,12 +43,15 @@ async def owns_gamepass(roblox_user_id: int, gamepass_id: int) -> bool:
         f"https://inventory.roblox.com/v1/users/{roblox_user_id}"
         f"/items/GamePass/{gamepass_id}"
     )
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                return False
-            data = await resp.json()
-            return len(data.get("data", [])) > 0
+    try:
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    return False
+                data = await resp.json()
+                return len(data.get("data", [])) > 0
+    except Exception:
+        return False
 
 
 @client.event
@@ -70,8 +79,9 @@ async def verify(interaction: discord.Interaction, roblox_username: str):
     has_pass = await owns_gamepass(roblox_id, GAMEPASS_ID)
     if not has_pass:
         await interaction.followup.send(
-            f"❌ **{roblox_username}** does not own the required gamepass. "
-            "If you just bought it, wait a minute and try again.",
+            f"❌ **{roblox_username}** does not own the required gamepass, "
+            "or their Roblox inventory is set to private. "
+            "Make sure your inventory is public and try again.",
             ephemeral=True,
         )
         return
